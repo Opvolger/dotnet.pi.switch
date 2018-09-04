@@ -1,15 +1,27 @@
-﻿using Microsoft.AspNetCore.Builder;
+﻿using System;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Swashbuckle.AspNetCore.Swagger;
+using IHostingEnvironment = Microsoft.AspNetCore.Hosting.IHostingEnvironment;
 
 namespace api.rpi.gpio
 {
     public class Startup
     {
+
+
         public Startup(IConfiguration configuration)
         {
             Configuration = configuration;
@@ -36,7 +48,8 @@ namespace api.rpi.gpio
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-        public void Configure(IApplicationBuilder app, IHostingEnvironment env)
+        public void Configure(IApplicationBuilder app, IHostingEnvironment env, ILoggerFactory loggerFactory,
+            IApplicationLifetime lifetime)
         {
             app.UseForwardedHeaders(new ForwardedHeadersOptions
             {
@@ -65,12 +78,68 @@ namespace api.rpi.gpio
                 c.SwaggerEndpoint("/swagger/v1/swagger.json", "My API V1");
             });
 
+
+            // Ja Warning!
+            RunRequestsToSample(lifetime.ApplicationStopping);
+
+            //GetLocalIPAddress();
             app.UseMvc(routes =>
             {
                 routes.MapRoute(
                     name: "default",
                     template: "{controller}/{action=Index}/{id?}");
             });
+        }
+
+        private static async Task RunRequestsToSample(CancellationToken token)
+        {
+            // Stuur elke minuut je ip adres op, voor als deze veranderd
+            while (!token.IsCancellationRequested)
+            {
+                var ip = GetLocalIPAddress();
+
+                using (HttpClient client = new HttpClient())
+                {
+                    var url = $"http://opvolger.net/online.php?ip={ip}";
+                    await client.GetAsync(url, token);
+                    Console.WriteLine($"{url}");
+                }
+                await Task.Delay(60000, token);
+            }
+        }
+
+        public static string GetLocalIPAddress()
+        {
+            var firstUpInterfaces = NetworkInterface.GetAllNetworkInterfaces().Where(c => c.NetworkInterfaceType != NetworkInterfaceType.Loopback && c.OperationalStatus == OperationalStatus.Up);
+            foreach (var firstUpInterface in firstUpInterfaces)
+            {
+                    var props = firstUpInterface.GetIPProperties();
+                    // get first IPV4 address assigned to this interface
+                    var firstIpV4Address = props.UnicastAddresses
+                        .Where(c => c.Address.AddressFamily == AddressFamily.InterNetwork)
+                        .Select(c => c.Address)
+                        .FirstOrDefault();
+                    var ip = firstIpV4Address;
+                if (ip != null && !ip.ToString().StartsWith("10") && !ip.ToString().StartsWith("127") && !ip.ToString().EndsWith(".1"))
+                {
+                    Console.WriteLine($"ip: {ip?.ToString()}");
+                    return ip?.ToString();
+                }
+                Console.WriteLine($"ip niet goed: {ip?.ToString()}");
+            }
+
+
+            var host = Dns.GetHostEntry(Dns.GetHostName());
+            foreach (var ip in host.AddressList)
+            {
+                Console.WriteLine($"AddressFamily: {ip.AddressFamily}");
+                Console.WriteLine($"ip: {ip.ToString()}");
+                if (ip.AddressFamily == AddressFamily.InterNetwork && !ip.ToString().StartsWith("10"))
+                {
+                    return ip.ToString();
+                }
+            }
+            throw new Exception("No network adapters with an IPv4 address in the system!");
         }
     }
 }

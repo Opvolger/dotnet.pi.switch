@@ -19,15 +19,17 @@ namespace api.rpi.gpio.Controllers
         }
 
         [HttpGet("[action]")]
-        public void On()
+        public string On()
         {
             this.SwitchPin(true);
+            return "On";
         }
 
         [HttpGet("[action]")]
-        public void Off()
+        public string Off()
         {
             this.SwitchPin(false);
+            return "Off";
         }
 
         private void SwitchPin(bool isOn)
